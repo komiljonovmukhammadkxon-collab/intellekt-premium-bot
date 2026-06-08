@@ -11,7 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 # ==========================================
-# 🔑 TOKENLARNI SHU YERGA JOYLASHTIRING
+# 🔑 TOKENLAR
 # ==========================================
 BOT_TOKEN = "8931904012:AAF655P4Fk3eNbJ8ZMP_OOCtCybbCX8iHnc"
 CLICK_PROVIDER_TOKEN = "398062629:TEST:999999999_F91D8F69C042267444B74CC0B3C747757EB0E065"
@@ -19,14 +19,11 @@ CLICK_PROVIDER_TOKEN = "398062629:TEST:999999999_F91D8F69C042267444B74CC0B3C7477
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# 🧠 FSM - Bot holatlarini boshqarish
 class SearchStates(StatesGroup):
     waiting_for_book = State()
     waiting_for_audio = State()
 
-# ==========================================
-# 📊 MA'LUMOTLAR BAZASI (SQLite)
-# ==========================================
+# 📊 Ma'lumotlar bazasi (SQLite)
 conn = sqlite3.connect("users.db", check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("""
@@ -58,13 +55,13 @@ def check_limit(user_id):
         conn.commit()
         downloads_today = 0
         
-    if downloads_today < 2:  # Bepul foydalanuvchilar uchun kunlik limit
+    if downloads_today < 2:
         return True, "free"
     else:
         return False, "limit_out"
 
 # ==========================================
-# 🚀 BOT BUYRUQLARI VA LOGIKASI
+# 🚀 BOT BUYRUQLARI
 # ==========================================
 
 @dp.message(Command("start"))
@@ -75,9 +72,8 @@ async def start_cmd(message: types.Message):
     ]
     keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
     await message.answer(
-        "🧠 INTELLEKT — 100% Avtomat kutubxona botiga xush kelibsiz!\n\n"
-        "Oddiy a'zolar kuniga 1 ta kitob va 1 ta audio qidirishlari mumkin. "
-        "Premium a'zolarda esa mutlaqo cheksiz va avtomat tizim! 🚀", 
+        "🧠 INTELLEKT — Avtomat kutubxona botiga xush kelibsiz!\n\n"
+        "Kitob yoki audio qidirish uchun tugmalardan foydalaning.", 
         reply_markup=keyboard
     )
 
@@ -85,108 +81,105 @@ async def start_cmd(message: types.Message):
 async def ask_book(message: types.Message, state: FSMContext):
     allowed, status = check_limit(message.from_user.id)
     if allowed:
-        await message.answer("🔍 Qidirayotgan kitobingiz nomini yoki muallifini kiriting:")
+        await message.answer("🔍 Qidirayotgan kitobingiz nomini kiriting (Masalan: harry potter):")
         await state.set_state(SearchStates.waiting_for_book)
     else:
-        await message.answer(
-            "🚫 Bugungi bepul limitingiz tugadi!\n\n"
-            "Kutib o'tirmasdan barcha kitoblarni hoziroq cheksiz yuklab olish uchun pastdagi "
-            "\"💎 Premium sotib olish\" tugmasini bosing."
-        )
+        await message.answer("🚫 Bugungi bepul limitingiz tugadi! Davom etish uchun Premium obuna bo'ling.")
 
-# 🌐 INTERNETDAN AVTOMAT KITOB QIDIRISH
+# 🌐 INTERNETDAN QIDIRISH (HARF VA PROBEL XATOLARINI TUZATILGAN)
 @dp.message(SearchStates.waiting_for_book)
 async def fetch_book(message: types.Message, state: FSMContext):
-    book_name = message.text
-    status_msg = await message.answer("🔍 Global kutubxonalardan qidirilmoqda, iltimos kuting...")
+    # Foydalanuvchi yozgan matnni tozalaymiz: ortiqcha joylarni olib tashlab, hammasini kichik harfga o'tkazamiz
+    raw_input = message.text
+    cleaned_name = " ".join(raw_input.split()).lower().strip()
     
-    # Open Library API orqali avtomat kitob qidirish
-    url = f"https://openlibrary.org/search.json?q={requests.utils.quote(book_name)}"
+    status_msg = await message.answer("🔍 Internet bazasidan qidirilmoqda...")
+    
+    # URL so'rov uchun tozalangan matnni tayyorlaymiz
+    query_param = requests.utils.quote(cleaned_name)
+    url = f"https://openlibrary.org/search.json?q={query_param}"
+    
     try:
-        response = requests.get(url).json()
-        if response.get("docs"):
-            book_data = response["docs"][0]
-            title = book_data.get("title", "Noma'lum")
-            author = book_data.get("author_name", ["Noma'lum"])[0]
-            
-            # Kitob sahifasining havolasi (PDF yuklash imkoniyati bilan)
-            download_url = f"https://openlibrary.org{book_data.get('key')}"
-            
-            # Agar foydalanuvchi bepul versiyada bo'lsa, limitini oshiramiz
-            cursor.execute("SELECT is_premium FROM users WHERE user_id = ?", (message.from_user.id,))
-            if cursor.fetchone()[0] == 0:
-                cursor.execute("UPDATE users SET downloads_today = downloads_today + 1 WHERE user_id = ?", (message.from_user.id,))
-                conn.commit()
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("docs") and len(data["docs"]) > 0:
+                book_data = data["docs"][0]
+                title = book_data.get("title", "Noma'lum")
+                author = book_data.get("author_name", ["Noma'lum"])[0]
+                download_url = f"https://openlibrary.org{book_data.get('key')}"
+                
+                # Limitni yangilash
+                cursor.execute("SELECT is_premium FROM users WHERE user_id = ?", (message.from_user.id,))
+                user_status = cursor.fetchone()
+                if user_status and user_status[0] == 0:
+                    cursor.execute("UPDATE users SET downloads_today = downloads_today + 1 WHERE user_id = ?", (message.from_user.id,))
+                    conn.commit()
 
-            await status_msg.delete()
-            
-            inline_kb = [[types.InlineKeyboardButton(text="📥 PDF Yuklab olish", url=download_url)]]
-            keyboard = types.InlineKeyboardMarkup(inline_keyboard=inline_kb)
-            
-            await message.answer(
-                f"✅ Kitob topildi!\n\n📖 Nomi: {title}\n✍️ Muallif: {author}\n\n"
-                f"Pastdagi tugma orqali kitob sahifasiga o'ting va PDF formatini yuklab oling:", 
-                reply_markup=keyboard
-            )
+                inline_kb = [[types.InlineKeyboardButton(text="📥 PDF Yuklab olish", url=download_url)]]
+                keyboard = types.InlineKeyboardMarkup(inline_keyboard=inline_kb)
+                
+                await status_msg.delete()
+                await message.answer(f"✅ Kitob topildi!\n\n📖 Nomi: {title}\n✍️ Muallif: {author}", reply_markup=keyboard)
+            else:
+                await status_msg.edit_text("❌ Bu nomdagi kitob bazadan topilmadi. Iltimos, inglizcha nomlarini yozib ko'ring (Masalan: 'atomic habits').")
         else:
-            await status_msg.edit_text("❌ Afsuski, bu nomdagi kitob jahon kutubxonalaridan topilmadi. Boshqa nom yozib ko'ring.")
+            await status_msg.edit_text("⚠️ Kutubxona serveri javob bermadi. Keyinroq urinib ko'ring.")
     except Exception as e:
-        await status_msg.edit_text("⚠️ Qidiruv tizimida xatolik yuz berdi. Birozdan so'ng qayta urinib ko'ring.")
+        await status_msg.edit_text("❌ Qidiruvda xatolik bo'ldi. Boshqa nom yozib ko'ring.")
     
     await state.clear()
 
-# 🎧 AVTOMAT AUDIO GENERATSIYA (TEXT-TO-SPEECH)
+# 🎧 AUDIO QIDIRISH (TEXT-TO-SPEECH)
 @dp.message(F.text == "🎧 Audio eshitish")
 async def ask_audio(message: types.Message, state: FSMContext):
     allowed, status = check_limit(message.from_user.id)
     if allowed:
-        await message.answer("🔍 Qaysi kitob yoki mavzuning audiosi kerak? Nomini yoki matnni yozing:")
+        await message.answer("🔍 Ovozga aylantirmoqchi bo'lgan matningizni yoki kitob nomini yozing:")
         await state.set_state(SearchStates.waiting_for_audio)
     else:
-        await message.answer(
-            "🚫 Bugungi bepul limitingiz tugadi!\n\n"
-            "Cheksiz audio eshitish uchun pastdagi \"💎 Premium sotib olish\" tugmasini bosing."
-        )
+        await message.answer("🚫 Bugungi bepul limitingiz tugadi!")
 
 @dp.message(SearchStates.waiting_for_audio)
 async def generate_audio(message: types.Message, state: FSMContext):
     text_to_speak = message.text
-    status_msg = await message.answer("🎙 Audio matn avtomat ovozga aylantirilmoqda, kuting...")
+    status_msg = await message.answer("🎙 Audio tayyorlanmoqda...")
     
-    # Google Translate TTS API (O'zbek tilida ovoz qilish)
     tts_url = f"https://translate.google.com/translate_tts?ie=UTF-8&tl=uz&client=tw-ob&q={requests.utils.quote(text_to_speak)}"
     
     try:
         cursor.execute("SELECT is_premium FROM users WHERE user_id = ?", (message.from_user.id,))
-        if cursor.fetchone()[0] == 0:
+        user_status = cursor.fetchone()
+        if user_status and user_status[0] == 0:
             cursor.execute("UPDATE users SET downloads_today = downloads_today + 1 WHERE user_id = ?", (message.from_user.id,))
             conn.commit()
             
         await status_msg.delete()
-        # Ovozli xabar shaklida yuborish
-        await bot.send_audio(chat_id=message.chat.id, audio=tts_url, title=f"{text_to_speak} (Audio-kitob)")
+        await bot.send_audio(chat_id=message.chat.id, audio=tts_url, title=f"{text_to_speak}")
     except Exception as e:
-        await status_msg.edit_text("❌ Kechirasiz, ushbu matn bo'yicha ovozli fayl tayyorlashda xatolik yuz berdi.")
+        await status_msg.edit_text("❌ Audioni yuklashda xatolik yuz berdi.")
         
     await state.clear()
 
 # ==========================================
-# 💳 CLICK AVTOMAT TO'LOV TIZIMI (49 000 SO'M)
+# 💳 CLICK TO'LOV TIZIMI
 # ==========================================
 
 @dp.message(F.text == "💎 Premium sotib olish")
 async def buy_premium(message: types.Message):
-    prices = [LabeledPrice(label="Premium Obuna (Umrbod)", amount=4900000)]
-    
-    await bot.send_invoice(
-        chat_id=message.chat.id,
-        title="INTELLEKT | PREMIUM STATUS",
-        description="Botdagi barcha kitoblar va audiolarga umrbod cheksiz ruxsat olish.",
-        provider_token=CLICK_PROVIDER_TOKEN,
-        currency="UZS",
-        prices=prices,
-        payload="premium_upgrade_via_click"
-    )
+    try:
+        prices = [LabeledPrice(label="Premium Obuna", amount=4900000)]
+        await bot.send_invoice(
+            chat_id=message.chat.id,
+            title="INTELLEKT | PREMIUM",
+            description="Umrbod cheksiz ruxsat olish.",
+            provider_token=CLICK_PROVIDER_TOKEN,
+            currency="UZS",
+            prices=prices,
+            payload="premium_upgrade"
+        )
+    except Exception as e:
+        await message.answer("⚠️ To'lov tizimini ulashda xatolik bo'ldi. Token noto'g'ri yoki Click o'chiq.")
 
 @dp.pre_checkout_query()
 async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
@@ -194,17 +187,12 @@ async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
 
 @dp.message(F.successful_payment)
 async def success_payment_handler(message: types.Message):
-    user_id = message.from_user.id
-    cursor.execute("UPDATE users SET is_premium = 1 WHERE user_id = ?", (user_id,))
+    cursor.execute("UPDATE users SET is_premium = 1 WHERE user_id = ?", (message.from_user.id,))
     conn.commit()
-    
-    await message.answer(
-        "🎉 Tabriklaymiz! Click orqali to'lovingiz muvaffaqiyatli qabul qilindi.\n"
-        "Sizga PREMIUM statusi berildi. Endi barcha cheklovlar olib tashlandi! 🚀"
-    )
+    await message.answer("🎉 Premium status muvaffaqiyatli faollashtirildi!")
 
 # ==========================================
-# 🌐 SERVER PORTINI ESHITISH (RENDER UCHUN)
+# 🌐 SERVER
 # ==========================================
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
