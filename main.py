@@ -13,7 +13,7 @@ from aiogram.fsm.state import State, StatesGroup
 # ==========================================
 # 🔑 TOKENLAR
 # ==========================================
-BOT_TOKEN = "BU_YERGA_BOT_TOKENINGIZNI_YOZING"
+BOT_TOKEN = "8931904012:AAF655P4Fk3eNbJ8ZMP_OOCtCybbCX8iHnc"
 CLICK_PROVIDER_TOKEN = "398062629:TEST:999999999_F91D8F69C042267444B74CC0B3C747757EB0E065"
 
 bot = Bot(token=BOT_TOKEN)
