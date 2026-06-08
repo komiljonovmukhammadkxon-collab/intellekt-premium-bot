@@ -11,11 +11,17 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 # ==========================================
-# 🔑 TOKENLAR (Shu yerga o'z tokenlaringizni qo'ying)
+# 🔑 TOKENLAR SECTION
 # ==========================================
+# DIQQAT: Tokeningizni faqat mana shu qo'shtirnoq ichiga yozing! 
+# Qo'shtirnoq yopilishi shart, tagidagi boshqa qatorlarga tegib ketmasin.
+
 BOT_TOKEN = "8931904012:AAF655P4Fk3eNbJ8ZMP_OOCtCybbCX8iHnc"
 CLICK_PROVIDER_TOKEN = "398062629:TEST:999999999_F91D8F69C042267444B74CC0B3C747757EB0E065"
 
+# ==========================================
+# 🛠 BOTNING ASOSIY SOZLAMALARI
+# ==========================================
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
@@ -56,7 +62,7 @@ def check_limit(user_id):
             conn.commit()
             downloads_today = 0
             
-        if downloads_today < 2:  # Kunlik bepul limit
+        if downloads_today < 2:
             return True, "free"
         else:
             return False, "limit_out"
@@ -64,7 +70,7 @@ def check_limit(user_id):
         return True, "error_fallback"
 
 # ==========================================
-# 🚀 BOT INTERFEYSI VA BUYRUQLARI
+# 🚀 BOT BUYRUQLARI VA INTERFEYSI
 # ==========================================
 
 @dp.message(Command("start"))
@@ -76,7 +82,7 @@ async def start_cmd(message: types.Message):
     keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
     await message.answer(
         "🧠 INTELLEKT — Avtomat ko'p tarmoqli kutubxona botiga xush kelibsiz!\n\n"
-        "Kitob yoki audio qidirish uchun quyidagi tugmalardan foydalaning.", 
+        "Kitob qidirish yoki matnni ovozli (audio) qilish uchun tugmalardan foydalaning.", 
         reply_markup=keyboard
     )
 
@@ -84,16 +90,15 @@ async def start_cmd(message: types.Message):
 async def ask_book(message: types.Message, state: FSMContext):
     allowed, status = check_limit(message.from_user.id)
     if allowed:
-        await message.answer("🔍 Qidirayotgan kitobingiz nomini kiriting:\n*(Kichik harf yoki joy tashlash xatolari avtomat to'g'rilanadi)*")
+        await message.answer("🔍 Qidirayotgan kitobingiz nomini kiriting:\n*(Harf va probel xatolari avtomat to'g'rilanadi)*")
         await state.set_state(SearchStates.waiting_for_book)
     else:
         await message.answer("🚫 Bugungi bepul limitingiz tugadi! Davom etish uchun Premium obuna bo'ling.")
 
-# 🌐 MULTI-SEARCH: RESURS REJIMIDA INTEGRATSIYA
+# 🌐 MULTI-SEARCH KODLAR (KITOB QIDIRUV TIZIMI)
 @dp.message(SearchStates.waiting_for_book)
 async def fetch_book(message: types.Message, state: FSMContext):
     raw_input = message.text
-    # 🛠 SIZ AYTGANINGIZDEK: hamma harf kichik qilinadi, bosh/oxir va o'rtadagi ortiqcha joylar butkul tozalanadi
     cleaned_name = " ".join(raw_input.split()).lower().strip()
     
     if not cleaned_name:
@@ -105,7 +110,7 @@ async def fetch_book(message: types.Message, state: FSMContext):
     query_param = requests.utils.quote(cleaned_name)
     found_books = []
 
-    # 1-MANBA: Internet Archive API (To'g'ridan-to'g'ri yuklanadigan fayllar ombori)
+    # 1-MANBA: Internet Archive API
     try:
         archive_url = f"https://archive.org/advancedsearch.php?q=title:({query_param})+AND+mediatype:(texts)&fl[]=identifier,title,creator&sort[]=&rows=2&output=json"
         res = requests.get(archive_url, timeout=5).json()
@@ -119,9 +124,9 @@ async def fetch_book(message: types.Message, state: FSMContext):
                     "source": "Internet Archive (Ochiq PDF)"
                 })
     except Exception:
-        pass  # Xato bersa o'chib qolmaydi, keyingi saytga o'tadi
+        pass
 
-    # 2-MANBA: Google Books API (Dunyo kutubxonasi)
+    # 2-MANBA: Google Books API
     try:
         google_url = f"https://www.googleapis.com/books/v1/volumes?q={query_param}&maxResults=2"
         res = requests.get(google_url, timeout=5).json()
@@ -156,7 +161,6 @@ async def fetch_book(message: types.Message, state: FSMContext):
     except Exception:
         pass
 
-    # NATIJANI CHIQARISH
     try:
         await status_msg.delete()
     except Exception:
@@ -164,8 +168,6 @@ async def fetch_book(message: types.Message, state: FSMContext):
 
     if found_books:
         best_match = found_books[0]
-        
-        # Limitni yangilash qismi
         try:
             cursor.execute("SELECT is_premium FROM users WHERE user_id = ?", (message.from_user.id,))
             user_status = cursor.fetchone()
@@ -194,12 +196,14 @@ async def fetch_book(message: types.Message, state: FSMContext):
         
     await state.clear()
 
-# 🎧 AUDIO TIZIMI
+# ==========================================
+# 🎧 AUDIO TIZIMI (TEXT-TO-SPEECH)
+# ==========================================
 @dp.message(F.text == "🎧 Audio eshitish")
 async def ask_audio(message: types.Message, state: FSMContext):
     allowed, status = check_limit(message.from_user.id)
     if allowed:
-        await message.answer("🔍 Ovozli eshitmoqchi bo'lgan matn yoki kitob nomini yozing:")
+        await message.answer("🔍 Ovozli eshitmoqchi bo'lgan matningizni yoki kitob nomini yozing:")
         await state.set_state(SearchStates.waiting_for_audio)
     else:
         await message.answer("🚫 Bugungi bepul limitingiz tugadi!")
@@ -209,6 +213,7 @@ async def generate_audio(message: types.Message, state: FSMContext):
     text_to_speak = message.text
     status_msg = await message.answer("🎙 Audio tayyorlanmoqda...")
     
+    # Google translate TTS bazasi orqali ovozga aylantirish havolasi
     tts_url = f"https://translate.google.com/translate_tts?ie=UTF-8&tl=uz&client=tw-ob&q={requests.utils.quote(text_to_speak)}"
     
     try:
@@ -222,7 +227,8 @@ async def generate_audio(message: types.Message, state: FSMContext):
             pass
             
         await status_msg.delete()
-        await bot.send_audio(chat_id=message.chat.id, audio=tts_url, title=f"{text_to_speak}")
+        # Ovozli xabar shaklida yuborish
+        await bot.send_audio(chat_id=message.chat.id, audio=tts_url, title=f"{text_to_speak[:20]}...")
     except Exception:
         try:
             await status_msg.edit_text("❌ Audioni yuklashda xatolik yuz berdi.")
@@ -234,7 +240,6 @@ async def generate_audio(message: types.Message, state: FSMContext):
 # ==========================================
 # 💳 CLICK INTEGRATSIYASI
 # ==========================================
-
 @dp.message(F.text == "💎 Premium sotib olish")
 async def buy_premium(message: types.Message):
     try:
@@ -265,7 +270,7 @@ async def success_payment_handler(message: types.Message):
         await message.answer("🎉 To'lov o'tdi! Premium tizimi faollashdi.")
 
 # ==========================================
-# 🌐 SERVER (RENDER PORTI UCHUN)
+# 🌐 WEB SERVER (RENDER INTEGRATSIYASI UCHUN)
 # ==========================================
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
