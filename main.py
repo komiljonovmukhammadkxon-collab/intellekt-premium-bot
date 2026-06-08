@@ -176,7 +176,6 @@ async def generate_audio(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "💎 Premium sotib olish")
 async def buy_premium(message: types.Message):
-    # Summa roppa-rosa 49 000 so'm chiqishi uchun oxiriga ikki nol qo'shilgan
     prices = [LabeledPrice(label="Premium Obuna (Umrbod)", amount=4900000)]
     
     await bot.send_invoice(
@@ -214,3 +213,10 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"Bot is alive")
 
 def run_health_check():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    server.serve_forever()
+
+if __name__ == "__main__":
+    threading.Thread(target=run_health_check, daemon=True).start()
+    dp.run_polling(bot)
