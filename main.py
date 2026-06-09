@@ -52,9 +52,9 @@ MSG = {
         "💡 O'zbek, Rus yoki Inglizcha yozing\n"
         "💡 Пишите на узбекском, русском или английском"
     ),
-    "searching":    "⏳ Qidirilmoqda... | Идёт поиск...",
-    "sending_pdf":  "📤 PDF yuklanmoqda... | Загрузка PDF...",
-    "making_pdf":   "📄 PDF tayyorlanmoqda... | Создание PDF...",
+    "searching":   "⏳ Qidirilmoqda... | Идёт поиск...",
+    "sending_pdf": "📤 PDF yuklanmoqda... | Загрузка PDF...",
+    "making_pdf":  "📄 PDF tayyorlanmoqda... | Создание PDF...",
     "book_not_found": (
         "❌ *Kitob topilmadi*\n"
         "❌ *Книга не найдена*\n\n"
@@ -120,7 +120,7 @@ class States(StatesGroup):
     waiting_for_audio = State()
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 🗄 4. MA'LUMOTLAR BAZASI (SQLite)
+# 🗄 4. MA'LUMOTLAR BAZASI
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 conn   = sqlite3.connect("users.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -166,9 +166,9 @@ def is_premium(user_id):
     return False
 
 def set_premium(user_id, plan):
-    today = datetime.today()
+    today     = datetime.today()
     durations = {"1day": 1, "1month": 30, "3month": 90}
-    until = None if plan == "lifetime" else (today + timedelta(days=durations.get(plan, 30))).strftime('%Y-%m-%d')
+    until     = None if plan == "lifetime" else (today + timedelta(days=durations.get(plan, 30))).strftime('%Y-%m-%d')
     cursor.execute("UPDATE users SET premium_type = ?, premium_until = ? WHERE user_id = ?", (plan, until, user_id))
     conn.commit()
 
@@ -200,7 +200,7 @@ def get_status_text(user_id):
         return "💎 Umrbod Premium | Пожизненный Premium"
     if puntil and datetime.today() <= datetime.strptime(puntil, '%Y-%m-%d'):
         days_left = (datetime.strptime(puntil, '%Y-%m-%d') - datetime.today()).days
-        labels = {"1day": "Kunlik|Дневной", "1month": "Oylik|Месячный", "3month": "3 Oylik|3 Месяца"}
+        labels    = {"1day": "Kunlik|Дневной", "1month": "Oylik|Месячный", "3month": "3 Oylik|3 Месяца"}
         return f"✅ {labels.get(ptype, 'Premium')} — {days_left} kun | дней qoldi"
     return "🆓 Bepul | Бесплатно (kuniga 2 ta | 2 в день)"
 
@@ -257,29 +257,20 @@ async def cmd_profile(message: types.Message):
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 def make_pdf_from_text(title, text):
-    """Matndan PDF yasash — Unicode shrift bilan"""
     pdf = FPDF()
     pdf.add_page()
-
-    # DejaVu shrift (Unicode, O'zbek/Rus harflarini ko'rsatadi)
     font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
     if os.path.exists(font_path):
         pdf.add_font("DejaVu", "", font_path, uni=True)
         pdf.set_font("DejaVu", size=15)
     else:
         pdf.set_font("Helvetica", size=15)
-
-    # Sarlavha
-    pdf.set_fill_color(30, 30, 30)
     pdf.multi_cell(0, 12, title, align="C")
     pdf.ln(6)
-
-    # Matn
     if os.path.exists(font_path):
         pdf.set_font("DejaVu", size=11)
     else:
         pdf.set_font("Helvetica", size=11)
-
     for line in text.split("\n"):
         line = line.strip()
         if not line:
@@ -289,35 +280,42 @@ def make_pdf_from_text(title, text):
             pdf.multi_cell(0, 7, line)
         except Exception:
             pass
-
     tmp = tempfile.mktemp(suffix=".pdf")
     pdf.output(tmp)
     return tmp
 
 def search_ziyouz(query):
-    """Ziyouz.com dan matn olish"""
+    """n.ziyouz.com dan matn olish"""
     try:
-        url = f"https://ziyouz.com/?s={requests.utils.quote(query)}"
-        r   = requests.get(url, timeout=10, headers=HEADERS)
+        url  = f"https://n.ziyouz.com/index.php?option=com_search&searchword={requests.utils.quote(query)}"
+        r    = requests.get(url, timeout=10, headers=HEADERS)
         soup = BeautifulSoup(r.text, "html.parser")
 
-        links = soup.select("h2.entry-title a") or soup.select("h1.entry-title a") or soup.select("article a")
+        links = (
+            soup.select("a.readon") or
+            soup.select("td.list-title a") or
+            soup.select("dt a")
+        )
         if not links:
             return None
 
-        book_url = links[0]["href"]
-        r2   = requests.get(book_url, timeout=10, headers=HEADERS)
+        book_url = links[0].get("href", "")
+        if not book_url.startswith("http"):
+            book_url = "https://n.ziyouz.com" + book_url
+
+        r2    = requests.get(book_url, timeout=10, headers=HEADERS)
         soup2 = BeautifulSoup(r2.text, "html.parser")
 
         content = (
+            soup2.select_one("div.item-page") or
             soup2.select_one("div.entry-content") or
-            soup2.select_one("div.post-content") or
+            soup2.select_one("div#content") or
             soup2.select_one("article")
         )
         if not content:
             return None
 
-        title_tag  = soup2.select_one("h1.entry-title") or soup2.select_one("h1")
+        title_tag  = soup2.select_one("h2.contentheading") or soup2.select_one("h1")
         title_text = title_tag.get_text(strip=True) if title_tag else query
         text       = content.get_text(separator="\n", strip=True)
 
@@ -340,7 +338,7 @@ def search_kutubxona(query):
             return None
 
         book_url = links[0]["href"]
-        r2   = requests.get(book_url, timeout=10, headers=HEADERS)
+        r2    = requests.get(book_url, timeout=10, headers=HEADERS)
         soup2 = BeautifulSoup(r2.text, "html.parser")
 
         content = soup2.select_one("div.entry-content") or soup2.select_one("article")
@@ -404,27 +402,28 @@ async def cmd_fetch_book(message: types.Message, state: FSMContext):
         return
 
     status_msg = await message.answer(MSG["searching"])
+    loop       = asyncio.get_event_loop()
 
-    # ── 1. Ziyouz.com ────────────────────────────────────────────
-    result = await asyncio.get_event_loop().run_in_executor(None, search_ziyouz, query)
+    # ── 1. Ziyouz.com ─────────────────────────────────────────
+    result = await loop.run_in_executor(None, search_ziyouz, query)
 
-    # ── 2. Kutubxona.uz ──────────────────────────────────────────
+    # ── 2. Kutubxona.uz ───────────────────────────────────────
     if not result:
-        result = await asyncio.get_event_loop().run_in_executor(None, search_kutubxona, query)
+        result = await loop.run_in_executor(None, search_kutubxona, query)
 
-    # ── Matndan PDF yasash ────────────────────────────────────────
+    # ── Matndan PDF yasash ─────────────────────────────────────
     if result:
         try:
             await status_msg.edit_text(MSG["making_pdf"])
-            tmp_path = await asyncio.get_event_loop().run_in_executor(
+            tmp_path = await loop.run_in_executor(
                 None, make_pdf_from_text, result["title"], result["text"]
             )
             await status_msg.delete()
             increment_download(message.from_user.id)
             await bot.send_document(
-                chat_id  = message.chat.id,
-                document = FSInputFile(tmp_path, filename=f"{result['title'][:40]}.pdf"),
-                caption  = f"✅ *{result['title']}*\n🌐 {result['source']}",
+                chat_id   = message.chat.id,
+                document  = FSInputFile(tmp_path, filename=f"{result['title'][:40]}.pdf"),
+                caption   = f"✅ *{result['title']}*\n🌐 {result['source']}",
                 parse_mode="Markdown"
             )
             os.unlink(tmp_path)
@@ -432,8 +431,8 @@ async def cmd_fetch_book(message: types.Message, state: FSMContext):
         except Exception:
             pass
 
-    # ── 3. Internet Archive (inglizcha kitoblar) ──────────────────
-    arch = await asyncio.get_event_loop().run_in_executor(None, search_archive, query)
+    # ── 3. Internet Archive ────────────────────────────────────
+    arch = await loop.run_in_executor(None, search_archive, query)
     if arch:
         try:
             await status_msg.edit_text(MSG["sending_pdf"])
@@ -446,9 +445,9 @@ async def cmd_fetch_book(message: types.Message, state: FSMContext):
             increment_download(message.from_user.id)
             await status_msg.delete()
             await bot.send_document(
-                chat_id  = message.chat.id,
-                document = FSInputFile(tmp_path, filename=f"{arch['title'][:40]}.pdf"),
-                caption  = f"✅ *{arch['title']}*\n✍️ {arch['author']}\n🌐 Internet Archive",
+                chat_id   = message.chat.id,
+                document  = FSInputFile(tmp_path, filename=f"{arch['title'][:40]}.pdf"),
+                caption   = f"✅ *{arch['title']}*\n✍️ {arch['author']}\n🌐 Internet Archive",
                 parse_mode="Markdown"
             )
             os.unlink(tmp_path)
@@ -467,7 +466,7 @@ async def cmd_fetch_book(message: types.Message, state: FSMContext):
             increment_download(message.from_user.id)
             return
 
-    # ── Topilmadi ────────────────────────────────────────────────
+    # ── Topilmadi ──────────────────────────────────────────────
     try:
         await status_msg.delete()
     except Exception:
@@ -478,11 +477,9 @@ async def cmd_fetch_book(message: types.Message, state: FSMContext):
 # 🎧 10. AUDIO TIZIMI (gTTS)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def detect_lang(text):
-    cyrillic = sum(1 for c in text if '\u0400' <= c <= '\u04FF')
-    latin    = sum(1 for c in text if c.isascii() and c.isalpha())
+    cyrillic  = sum(1 for c in text if '\u0400' <= c <= '\u04FF')
+    latin     = sum(1 for c in text if c.isascii() and c.isalpha())
     if cyrillic > latin:
-        # Ko'proq kirill → O'zbek yoki Rus
-        # Rus harflari (ы, э, ъ) bo'lsa — Rus
         rus_chars = sum(1 for c in text if c in 'ыэъёЫЭЪЁ')
         return "ru" if rus_chars > 0 else "uz"
     return "en"
@@ -506,12 +503,11 @@ async def cmd_generate_audio(message: types.Message, state: FSMContext):
     if len(text) > 3000:
         await message.answer(MSG["text_too_long"])
         return
-
     status_msg = await message.answer(MSG["audio_making"])
     try:
-        lang     = detect_lang(text)
+        lang      = detect_lang(text)
         gtts_lang = GTTS_LANG.get(lang, "en")
-        tmp_path = tempfile.mktemp(suffix=".mp3")
+        tmp_path  = tempfile.mktemp(suffix=".mp3")
 
         def make_audio():
             tts = gTTS(text=text, lang=gtts_lang, slow=False)
@@ -593,7 +589,10 @@ async def on_successful_payment(message: types.Message):
         "1day": "1 Kunlik | 1 День", "1month": "1 Oylik | 1 Месяц",
         "3month": "3 Oylik | 3 Месяца", "lifetime": "Umrbod | Пожизненно"
     }
-    await message.answer(MSG["premium_success"] + f"\n\n📦 *{plan_labels.get(plan, plan)}*", parse_mode="Markdown")
+    await message.answer(
+        MSG["premium_success"] + f"\n\n📦 *{plan_labels.get(plan, plan)}*",
+        parse_mode="Markdown"
+    )
     if ADMIN_ID:
         try:
             await bot.send_message(
